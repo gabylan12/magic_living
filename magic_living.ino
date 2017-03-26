@@ -10,6 +10,8 @@
 #include "Bounce2.h"
 #include "DHT.h"
 
+#include "RestClient.h"
+
 ESP8266WebServer server(80);
 
 
@@ -17,6 +19,8 @@ ESP8266WebServer server(80);
 String command;
 StaticJsonBuffer<200> jsonBuffer;
 JsonObject& jsonCommand = jsonBuffer.createObject();
+RestClient restclient = RestClient("openhab",8080);;
+
 char toChar[2500];
 
 //RELAY
@@ -32,7 +36,6 @@ Bounce debouncer_relay2 = Bounce();
 
 //DHT
 #define DHTPIN D1 
-//#define DHTTYPE DHT22   // DHT 22  (AM2302), AM2321
 DHT dht(DHTPIN, DHT22);
 
 void handleLight() {
@@ -45,10 +48,12 @@ void handleLight() {
   switch(number){
     case 1:{
       digitalWrite(LIGHT_LIVING_ROOM_PIN,state);
+      Serial.println(restclient.put("/rest/items/Light_Living_Room/state",state?"ON":"OFF"));
     }
     break;
     case 2:{
       digitalWrite(LIGHT_DINNING_ROOM_PIN,state);
+      Serial.println(restclient.put("/rest/items/Light_Dinning_Room/state",state?"ON":"OFF"));
     }
   }
 
@@ -145,6 +150,8 @@ void setup() {
 
 
   server.begin();
+
+  restclient.setContentType("text/plain; charset=utf8");
 
   //RELAY
   pinMode(LIGHT_LIVING_ROOM_PIN,  OUTPUT) ;
