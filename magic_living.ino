@@ -43,17 +43,17 @@ void handleLight() {
   
 
   int number = server.arg("number").toInt();
-  boolean state  = server.arg("state").toInt();
+  String state  = server.arg("state");
 
   switch(number){
     case 1:{
-      digitalWrite(LIGHT_LIVING_ROOM_PIN,state);
-      Serial.println(restclient.put("/rest/items/Light_Living_Room/state",state?"ON":"OFF"));
+      digitalWrite(LIGHT_LIVING_ROOM_PIN,state.equals("ON")?1:0);
+      Serial.println(restclient.put("/rest/items/Light_Living_Room/state",state.equals("ON")?"ON":"OFF"));
     }
     break;
     case 2:{
-      digitalWrite(LIGHT_DINNING_ROOM_PIN,state);
-      Serial.println(restclient.put("/rest/items/Light_Dinning_Room/state",state?"ON":"OFF"));
+      digitalWrite(LIGHT_DINNING_ROOM_PIN,state.equals("ON")?1:0);
+      Serial.println(restclient.put("/rest/items/Light_Dinning_Room/state",state.equals("ON")?"ON":"OFF"));
     }
   }
 
@@ -64,11 +64,12 @@ void handleLight() {
 
 void handleSensors() {
   digitalWrite(LED_BUILTIN, LOW);
- 
+
+ command = "";
  jsonCommand["temperature"] = dht.readTemperature();
  jsonCommand["humidity"] = dht.readHumidity();
- jsonCommand["lightLivingRoom"] = digitalRead(LIGHT_LIVING_ROOM_PIN);
- jsonCommand["lightDinningRoom"] = digitalRead(LIGHT_DINNING_ROOM_PIN);
+ jsonCommand["lightLivingRoom"] = digitalRead(LIGHT_LIVING_ROOM_PIN)?"ON":"OFF";
+ jsonCommand["lightDinningRoom"] = digitalRead(LIGHT_DINNING_ROOM_PIN)?"ON":"OFF";
  jsonCommand.printTo(command);
  server.send(200, "text/html", command);
  delay(500);                    
@@ -79,36 +80,7 @@ void setLightValue(int pin,boolean turn){
   digitalWrite(pin,turn);
 }
 
-void handleCommand() {
-  digitalWrite(LED_BUILTIN, LOW); 
 
-  //receive message
-  command = server.arg("command");
-  
-  unsigned int rawbuf[250];
-  int k = 0;
-  //decode message
-  while(true){
-    rawbuf[k++] = command.toInt();
-
-    if(command.indexOf(' ') == -1){
-      break;
-    }
-    command = command.substring(command.indexOf(' ')+1);
-  }
-
-
-  //response message
-  jsonCommand["code"] = "OK";
-  command = "";
-  jsonCommand.printTo(command);
-  server.send(200, "text/html", command);
-  delay(500);                    
-  digitalWrite(LED_BUILTIN, HIGH);
-
-}
-
- 
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
