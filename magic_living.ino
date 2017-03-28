@@ -26,12 +26,21 @@ char toChar[2500];
 //RELAY
 #define LIGHT_LIVING_ROOM_PIN  13
 #define LIGHT_DINNING_ROOM_PIN  12
+#define BUTTON_PIN_RELAY_1  D2
+#define BUTTON_PIN_RELAY_2  D3
 
 int state_relay1 = LOW;       // estado actual del pin de salida 
 int state_relay2 = LOW;       // estado actual del pin de sali
 
 Bounce debouncer_relay1 = Bounce(); 
 Bounce debouncer_relay2 = Bounce();
+
+//PHOTOCELL
+#define PHOTOCELL A0
+int lastLightReading  = -1;
+const long TIMEOUT_READ_DHT = 30000;
+long timer_dht = TIMEOUT_READ_DHT + 1;
+
 
 
 //DHT
@@ -48,12 +57,12 @@ void handleLight() {
   switch(number){
     case 1:{
       digitalWrite(LIGHT_LIVING_ROOM_PIN,state.equals("ON")?1:0);
-      Serial.println(restclient.put("/rest/items/Light_Living_Room/state",state.equals("ON")?"ON":"OFF"));
+      restclient.put("/rest/items/Light_Living_Room/state",state.equals("ON")?"ON":"OFF");
     }
     break;
     case 2:{
       digitalWrite(LIGHT_DINNING_ROOM_PIN,state.equals("ON")?1:0);
-      Serial.println(restclient.put("/rest/items/Light_Dinning_Room/state",state.equals("ON")?"ON":"OFF"));
+      restclient.put("/rest/items/Light_Dinning_Room/state",state.equals("ON")?"ON":"OFF");
     }
   }
 
@@ -70,6 +79,8 @@ void handleSensors() {
  jsonCommand["humidity"] = dht.readHumidity();
  jsonCommand["lightLivingRoom"] = digitalRead(LIGHT_LIVING_ROOM_PIN)?"ON":"OFF";
  jsonCommand["lightDinningRoom"] = digitalRead(LIGHT_DINNING_ROOM_PIN)?"ON":"OFF";
+ jsonCommand["lightLevel"] = map(analogRead(PHOTOCELL), 0, 1023, 0, 100);
+
  jsonCommand.printTo(command);
  server.send(200, "text/html", command);
  delay(500);                    
@@ -129,6 +140,15 @@ void setup() {
   pinMode(LIGHT_LIVING_ROOM_PIN,  OUTPUT) ;
   pinMode(LIGHT_DINNING_ROOM_PIN,  OUTPUT) ;
 
+  pinMode(BUTTON_PIN_RELAY_1, INPUT_PULLUP);
+  debouncer_relay1.attach(BUTTON_PIN_RELAY_1);
+  debouncer_relay1.interval(5);
+
+  pinMode(BUTTON_PIN_RELAY_2, INPUT_PULLUP);
+  debouncer_relay2.attach(BUTTON_PIN_RELAY_2);
+  debouncer_relay2.interval(5);
+
+
   //DHT
   dht.begin();
 
@@ -137,7 +157,54 @@ void setup() {
 
 }
 
+void checkButtons(){
+  debouncer_relay1.update();
+  // Get the update value
+  int value = debouncer_relay1.read();
+
+  
+  if (value != state_relay1 && value==0) {
+     digitalWrite(LIGHT_LIVING_ROOM_PIN , !digitalRead(LIGHT_LIVING_ROOM_PIN));  
+     restclient.put("/rest/items/Light_Living_Room/state",digitalRead(LIGHT_LIVING_ROOM_PIN)==HIGH?"ON":"OFF");
+  }
+  state_relay1 = value;
+
+  debouncer_relay2.update();
+  // Get the update value
+  value = debouncer_relay2.read();
+  if (value != state_relay2 && value==0) {
+     digitalWrite(LIGHT_DINNING_ROOM_PIN, !digitalRead(LIGHT_DINNING_ROOM_PIN));   
+     restclient.put("/rest/items/Light_Dinning_Room/state",digitalRead(LIGHT_DINNING_ROOM_PIN)==HIGH?"ON":"OFF");
+  }
+  state_relay2 = value;
+}
+
+void evaluateLight(){
+   //evaluate light
+   if(timer_dht > TIMEOUT_READ_DHT){
+
+     timer_dht = 0;
+     int photocellReading  = map(analogRead(PHOTOCELL), 0, 1023, 0, 100);
+     if(abs(lastLightReading - photocellReading) > 2){
+        lastLightReading = photocellReading;
+        String str = String(lastLightReading);
+        char  output[5];
+        str.toCharArray(output,5);
+        restclient.put("/rest/items/Living_Light/state",output);
+  
+      }
+        
+
+   }
+   timer_dht++;
+    
+      
+}
 
 void loop() {
   server.handleClient();
+  checkButtons();
+
+  evaluateLight();
+
 }
