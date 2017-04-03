@@ -47,6 +47,12 @@ long timer_dht = TIMEOUT_READ_DHT + 1;
 #define DHTPIN D1 
 DHT dht(DHTPIN, DHT22);
 
+//TURN OFF
+#define BUTTON_TURN_OFF  D4
+Bounce debouncer_turn_off = Bounce();
+
+
+
 void handleLight() {
   digitalWrite(LED_BUILTIN, LOW);
   
@@ -152,6 +158,12 @@ void setup() {
   //DHT
   dht.begin();
 
+  //TURN OFF
+  pinMode(BUTTON_TURN_OFF, INPUT_PULLUP);
+  debouncer_turn_off.interval(5);
+  debouncer_turn_off.attach(BUTTON_TURN_OFF);
+
+
   digitalWrite(LED_BUILTIN, HIGH);
 
 
@@ -176,7 +188,19 @@ void checkButtons(){
      digitalWrite(LIGHT_DINNING_ROOM_PIN, !digitalRead(LIGHT_DINNING_ROOM_PIN));   
      restclient.put("/rest/items/Light_Dinning_Room/state",digitalRead(LIGHT_DINNING_ROOM_PIN)==HIGH?"ON":"OFF");
   }
+
   state_relay2 = value;
+
+  debouncer_turn_off.update();
+  // Get the update value
+  value = debouncer_turn_off.read();
+  //if (value != state_relay2 && value==0) {
+  if (value==0) {
+     restclient.put("/rest/items/Living_Mode/state","2");
+  }
+
+
+  
 }
 
 void evaluateLight(){
