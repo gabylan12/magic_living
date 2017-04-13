@@ -9,23 +9,27 @@
 #include <ArduinoJson.h>
 #include "Bounce2.h"
 #include "DHT.h"
-
 #include "RestClient.h"
+#include <AsyncDelay.h>
 
 ESP8266WebServer server(80);
-
 
 //WIFI
 String command;
 StaticJsonBuffer<200> jsonBuffer;
 JsonObject& jsonCommand = jsonBuffer.createObject();
-RestClient restclient = RestClient("openhab",8080);;
+RestClient restclient = RestClient("openhab",8080);
+
 
 char toChar[2500];
+AsyncDelay wakeUpWifi;
+unsigned long timeToSleep;
+int wifiStatus;
+
 
 //RELAY
-#define LIGHT_LIVING_ROOM_PIN  13
-#define LIGHT_DINNING_ROOM_PIN  12
+#define LIGHT_LIVING_ROOM_PIN  D7
+#define LIGHT_DINNING_ROOM_PIN  D8
 #define BUTTON_PIN_RELAY_1  D2
 #define BUTTON_PIN_RELAY_2  D3
 
@@ -38,9 +42,7 @@ Bounce debouncer_relay2 = Bounce();
 //PHOTOCELL
 #define PHOTOCELL A0
 int lastLightReading  = -1;
-const long TIMEOUT_READ_DHT = 30000;
-long timer_dht = TIMEOUT_READ_DHT + 1;
-
+AsyncDelay readPhotocell;
 
 
 //DHT
@@ -53,6 +55,13 @@ Bounce debouncer_turn_off = Bounce();
 
 
 
+
+/**
+ * http invoke to handle the light
+ * example http://192.168.1.4:80/light?number=1&state=1
+ * number can be 1 or 2
+ * state is 0 to OFF and 1 to ON
+ */
 void handleLight() {
   digitalWrite(LED_BUILTIN, LOW);
   
@@ -77,6 +86,10 @@ void handleLight() {
   digitalWrite(LED_BUILTIN, HIGH);
 }
 
+/**
+ * get in json format all the sensors values
+ * example http://192.168.1.4/sensors
+ */
 void handleSensors() {
   digitalWrite(LED_BUILTIN, LOW);
 
@@ -93,8 +106,22 @@ void handleSensors() {
  digitalWrite(LED_BUILTIN, HIGH);
 }
 
-void setLightValue(int pin,boolean turn){
-  digitalWrite(pin,turn);
+/* get time to sleep the wifi
+ *  example http://192.168.1.4/sleep?hours=1&minutes=10&seconds=4
+ * 
+ */
+void handleSleep(){
+
+ 
+    timeToSleep = server.arg("seconds").toInt() * 1000;
+    timeToSleep += server.arg("minutes").toInt() * 60 * 1000;
+    timeToSleep += server.arg("hours").toInt() * 60 * 60 * 1000;
+
+    wakeUpWifi.start(timeToSleep, AsyncDelay::MILLIS);  
+    server.send(200, "text/html", command);
+
+    WiFi.mode(WIFI_OFF);
+   
 }
 
 
@@ -135,12 +162,14 @@ void setup() {
   Serial.println(WiFi.localIP());
 
   server.on("/light", handleLight);
+  server.on("/sleep", handleSleep);
   server.on("/sensors", handleSensors);
 
 
   server.begin();
 
   restclient.setContentType("text/plain; charset=utf8");
+
 
   //RELAY
   pinMode(LIGHT_LIVING_ROOM_PIN,  OUTPUT) ;
@@ -158,35 +187,51 @@ void setup() {
   //DHT
   dht.begin();
 
+  //PHOTOCELL
+  readPhotocell.start(1000, AsyncDelay::MILLIS);
+  
   //TURN OFF
   pinMode(BUTTON_TURN_OFF, INPUT_PULLUP);
   debouncer_turn_off.interval(5);
   debouncer_turn_off.attach(BUTTON_TURN_OFF);
 
-
+  
   digitalWrite(LED_BUILTIN, HIGH);
 
 
 }
 
+
+
+/**
+ * check the if the buttons were pressed to
+ * change the relays status or send command to openhab
+ * 
+ */
 void checkButtons(){
+
+
   debouncer_relay1.update();
+  
   // Get the update value
   int value = debouncer_relay1.read();
-
-  
+ 
   if (value != state_relay1 && value==0) {
      digitalWrite(LIGHT_LIVING_ROOM_PIN , !digitalRead(LIGHT_LIVING_ROOM_PIN));  
-     restclient.put("/rest/items/Light_Living_Room/state",digitalRead(LIGHT_LIVING_ROOM_PIN)==HIGH?"ON":"OFF");
+     if(wifiStatus == WL_CONNECTED ){
+      restclient.put("/rest/items/Light_Living_Room/state",digitalRead(LIGHT_LIVING_ROOM_PIN)==HIGH?"ON":"OFF");
+     }
   }
   state_relay1 = value;
-
+  
   debouncer_relay2.update();
   // Get the update value
   value = debouncer_relay2.read();
   if (value != state_relay2 && value==0) {
      digitalWrite(LIGHT_DINNING_ROOM_PIN, !digitalRead(LIGHT_DINNING_ROOM_PIN));   
-     restclient.put("/rest/items/Light_Dinning_Room/state",digitalRead(LIGHT_DINNING_ROOM_PIN)==HIGH?"ON":"OFF");
+     if(wifiStatus == WL_CONNECTED ){
+      restclient.put("/rest/items/Light_Dinning_Room/state",digitalRead(LIGHT_DINNING_ROOM_PIN)==HIGH?"ON":"OFF");
+     }
   }
 
   state_relay2 = value;
@@ -196,19 +241,23 @@ void checkButtons(){
   value = debouncer_turn_off.read();
   //if (value != state_relay2 && value==0) {
   if (value==0) {
-     restclient.put("/rest/items/Living_Mode/state","2");
+     if(wifiStatus == WL_CONNECTED){ 
+      restclient.put("/rest/items/Living_Mode/state","2");
+     }
   }
-
-
   
 }
 
-void evaluateLight(){
-   //evaluate light
-   if(timer_dht > TIMEOUT_READ_DHT){
 
-     timer_dht = 0;
-     int photocellReading  = map(analogRead(PHOTOCELL), 0, 1023, 0, 100);
+
+/* evaluate light status
+ *  if there is any change send to openhab
+ *  the light status
+ * 
+ */
+
+void evaluateLight(){
+    int photocellReading  = map(analogRead(PHOTOCELL), 0, 1023, 0, 100);
      if(abs(lastLightReading - photocellReading) > 2){
         lastLightReading = photocellReading;
         String str = String(lastLightReading);
@@ -217,18 +266,25 @@ void evaluateLight(){
         restclient.put("/rest/items/Living_Light/state",output);
   
       }
-        
-
-   }
-   timer_dht++;
-    
       
+     
 }
 
 void loop() {
   server.handleClient();
+  
   checkButtons();
+ 
+  wifiStatus = WiFi.status();
 
-  evaluateLight();
+  if (wifiStatus != WL_CONNECTED && readPhotocell.isExpired()  ) {
+    evaluateLight();
+    readPhotocell.repeat();
+  }
 
+  if (wifiStatus != WL_CONNECTED && wakeUpWifi.isExpired()  ) {
+    Serial.print("Reset the system...");
+    ESP.reset();
+  }
+ 
 }
