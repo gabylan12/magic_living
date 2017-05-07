@@ -53,9 +53,6 @@ DHT dht(DHTPIN, DHT22);
 #define BUTTON_TURN_OFF  D4
 Bounce debouncer_turn_off = Bounce();
 
-
-
-
 /**
  * http invoke to handle the light
  * example http://192.168.1.4:80/light?number=1&state=1
@@ -106,6 +103,7 @@ void handleSensors() {
  digitalWrite(LED_BUILTIN, HIGH);
 }
 
+
 /* get time to sleep the wifi
  *  example http://192.168.1.4/sleep?hours=1&minutes=10&seconds=4
  * 
@@ -135,14 +133,13 @@ void setup() {
   WiFiManager wifiManager;
 
   //exit after config instead of connecting
-  wifiManager.setBreakAfterConfig(true);
+ // wifiManager.setBreakAfterConfig(true);
 
   pinMode(LED_BUILTIN, OUTPUT);     // Initialize the LED_BUILTIN pin as an output
 
   //reset settings - for testing
  // wifiManager.resetSettings();
-
-
+  wifiManager.setBreakAfterConfig(true);
   //tries to connect to last known settings
   //if it does not connect it starts an access point with the specified name
   //here  "AutoConnectAP" with password "password"
@@ -150,7 +147,7 @@ void setup() {
   if (!wifiManager.autoConnect("LIVING")) {
     Serial.println("failed to connect, we should reset as see if it connects");
     delay(3000);
-    ESP.reset();
+  //  ESP.reset();
     delay(5000);
   }
 
@@ -195,7 +192,6 @@ void setup() {
   debouncer_turn_off.interval(5);
   debouncer_turn_off.attach(BUTTON_TURN_OFF);
 
-  
   digitalWrite(LED_BUILTIN, HIGH);
 
 
@@ -239,7 +235,6 @@ void checkButtons(){
   debouncer_turn_off.update();
   // Get the update value
   value = debouncer_turn_off.read();
-  //if (value != state_relay2 && value==0) {
   if (value==0) {
      if(wifiStatus == WL_CONNECTED){ 
       restclient.put("/rest/items/Living_Mode/state","2");
@@ -283,8 +278,10 @@ void loop() {
   }
 
   if (wifiStatus != WL_CONNECTED && wakeUpWifi.isExpired()  ) {
-    Serial.print("Reset the system...");
-    ESP.reset();
+    WiFi.mode(WIFI_STA);
+    WiFi.begin();
+    
   }
- 
+
+   
 }
