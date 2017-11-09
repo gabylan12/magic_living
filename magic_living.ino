@@ -211,12 +211,13 @@ void checkButtons(){
   
   // Get the update value
   int value = debouncer_relay1.read();
- 
   if (value != state_relay1 && value==0) {
+     digitalWrite(LED_BUILTIN, LOW);
      digitalWrite(LIGHT_LIVING_ROOM_PIN , !digitalRead(LIGHT_LIVING_ROOM_PIN));  
      if(wifiStatus == WL_CONNECTED ){
       restclient.put("/rest/items/Light_Living_Room/state",digitalRead(LIGHT_LIVING_ROOM_PIN)==HIGH?"ON":"OFF");
      }
+     digitalWrite(LED_BUILTIN, HIGH);
   }
   state_relay1 = value;
   
@@ -224,10 +225,12 @@ void checkButtons(){
   // Get the update value
   value = debouncer_relay2.read();
   if (value != state_relay2 && value==0) {
+     digitalWrite(LED_BUILTIN, LOW);
      digitalWrite(LIGHT_DINNING_ROOM_PIN, !digitalRead(LIGHT_DINNING_ROOM_PIN));   
      if(wifiStatus == WL_CONNECTED ){
       restclient.put("/rest/items/Light_Dinning_Room/state",digitalRead(LIGHT_DINNING_ROOM_PIN)==HIGH?"ON":"OFF");
      }
+     digitalWrite(LED_BUILTIN, HIGH);
   }
 
   state_relay2 = value;
@@ -236,9 +239,12 @@ void checkButtons(){
   // Get the update value
   value = debouncer_turn_off.read();
   if (value==0) {
+     digitalWrite(LED_BUILTIN, LOW);
      if(wifiStatus == WL_CONNECTED){ 
-      restclient.put("/rest/items/Living_Mode/state","2");
+      restclient.put("/rest/items/Living_Mode/state","TURN_OFF");
      }
+     digitalWrite(LED_BUILTIN, HIGH);
+
   }
   
 }
