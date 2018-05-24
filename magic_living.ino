@@ -120,29 +120,25 @@ bool handleFileRead(String path) {
 /**
  * http invoke to handle the light
  * example http://192.168.1.4:80/light?number=1&state=1
+ * curl --header "Content-Type: application/json"   --request POST   --data '{light1:{"state":"ON"},light2:{"state":"OFF"}}'   http://living/light
  * number can be 1 or 2
  * state is 0 to OFF and 1 to ON
  */
 void handleLight() {
   digitalWrite(LED_BUILTIN, LOW);
   
+  StaticJsonBuffer<200> newBuffer;
+  JsonObject& request = newBuffer.parseObject(server.arg("plain"));
+  String stateLight1  = request["light1"]["state"];
 
-  int number = server.arg("number").toInt();
-  String state  = server.arg("state");
+  digitalWrite(LIGHT_LIVING_ROOM_PIN,stateLight1.equals("ON")?1:0);
+  restclient.put("/rest/items/Light_Living_Room/state",stateLight1.equals("ON")?"ON":"OFF");
 
-  switch(number){
-    case 1:{
-      digitalWrite(LIGHT_LIVING_ROOM_PIN,state.equals("ON")?1:0);
-      restclient.put("/rest/items/Light_Living_Room/state",state.equals("ON")?"ON":"OFF");
-    }
-    break;
-    case 2:{
-      digitalWrite(LIGHT_DINNING_ROOM_PIN,state.equals("ON")?1:0);
-      restclient.put("/rest/items/Light_Dinning_Room/state",state.equals("ON")?"ON":"OFF");
-    }
-  }
+  String stateLight2  = request["light2"]["state"];
+  digitalWrite(LIGHT_DINNING_ROOM_PIN,stateLight2.equals("ON")?1:0);
+  restclient.put("/rest/items/Light_Dinning_Room/state",stateLight2.equals("ON")?"ON":"OFF");
 
-  server.send(200, "text/html", state?"ON":"OFF");
+  server.send(200, "application/json", "{success:true}");
   delay(500);                    
   digitalWrite(LED_BUILTIN, HIGH);
 }
@@ -169,19 +165,23 @@ void handleSensors() {
 
 
 /* get time to sleep the wifi
- *  example http://192.168.1.4/sleep?hours=1&minutes=10&seconds=4
+ *  example curl --header "Content-Type: application/json"   --request POST   --data '{"minutes":1,"seconds":10}'   http://living/sleep
  * 
  */
 void handleSleep(){
-
+    StaticJsonBuffer<200> newBuffer;
+    JsonObject& request = newBuffer.parseObject(server.arg("plain"));
+    int seconds = request["seconds"];
+    int minutes = request["minutes"];
+    int hours = request["hours"];
  
-    timeToSleep = server.arg("seconds").toInt() * 1000;
-    timeToSleep += server.arg("minutes").toInt() * 60 * 1000;
-    timeToSleep += server.arg("hours").toInt() * 60 * 60 * 1000;
-
+    timeToSleep = seconds * 1000;
+    timeToSleep += minutes * 60 * 1000;
+    timeToSleep += hours * 60 * 60 * 1000;
+    server.send ( 200, "text/json", "{success:true}" );
+  
     wakeUpWifi.start(timeToSleep, AsyncDelay::MILLIS);  
-    server.send(200, "text/html", command);
-
+    delay(500);
     WiFi.mode(WIFI_OFF);
    
 }
@@ -192,31 +192,13 @@ void setup() {
   Serial.begin(115200);
   Serial.println();
 
-    SPIFFS.begin();
+  SPIFFS.begin();
   persWM.begin();
 
-  //WiFiManager
   //Local intialization. Once its business is done, there is no need to keep it around
   WiFiManager wifiManager;
 
-  //exit after config instead of connecting
- // wifiManager.setBreakAfterConfig(true);
-
   pinMode(LED_BUILTIN, OUTPUT);     // Initialize the LED_BUILTIN pin as an output
-
-  //reset settings - for testing
- // wifiManager.resetSettings();
- // wifiManager.setBreakAfterConfig(true);
-  //tries to connect to last known settings
-  //if it does not connect it starts an access point with the specified name
-  //here  "AutoConnectAP" with password "password"
-  //and goes into a blocking loop awaiting configuration
- // if (!wifiManager.autoConnect("LIVING")) {
-  //  Serial.println("failed to connect, we should reset as see if it connects");
-   // delay(3000);
-  //  ESP.reset();
- //   delay(5000);
-  //}
 
   //if you get here you have connected to the WiFi
   Serial.println("connected!");
@@ -229,10 +211,7 @@ void setup() {
   server.on("/sleep", handleSleep);
   server.on("/sensors", handleSensors);
 
-
-
   restclient.setContentType("text/plain; charset=utf8");
-
 
   //RELAY
   pinMode(LIGHT_LIVING_ROOM_PIN,  OUTPUT) ;
@@ -245,7 +224,6 @@ void setup() {
   pinMode(BUTTON_PIN_RELAY_2, INPUT_PULLUP);
   debouncer_relay2.attach(BUTTON_PIN_RELAY_2);
   debouncer_relay2.interval(5);
-
 
   //DHT
   dht.begin();
