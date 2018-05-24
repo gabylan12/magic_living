@@ -3,6 +3,8 @@
 #include <ESP8266WiFi.h>          //https://github.com/esp8266/Arduino
 
 //needed for library
+#include <PersWiFiManager.h>
+#include <ESP8266SSDP.h>
 #include <DNSServer.h>
 #include <ESP8266WebServer.h>
 #include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager
@@ -13,6 +15,10 @@
 #include <AsyncDelay.h>
 
 ESP8266WebServer server(80);
+DNSServer dnsServer;
+PersWiFiManager persWM(server, dnsServer);
+
+const char *metaRefreshStr = "<script>window.location='/'</script><a href='/'>redirecting...</a>";
 
 //WIFI
 String command;
@@ -52,6 +58,64 @@ DHT dht(DHTPIN, DHT22);
 //TURN OFF
 #define BUTTON_TURN_OFF  D4
 Bounce debouncer_turn_off = Bounce();
+
+
+//code from fsbrowser example, consolidated.
+bool handleFileRead(String path) {
+  DEBUG_PRINT("handlefileread" + path);
+  if (path.endsWith("/")) path += "index.htm";
+  String contentType;
+  if (path.endsWith(".htm") || path.endsWith(".html")) contentType = "text/html";
+  else if (path.endsWith(".css")) contentType = "text/css";
+  else if (path.endsWith(".js")) contentType = "application/javascript";
+  else if (path.endsWith(".png")) contentType = "image/png";
+  else if (path.endsWith(".gif")) contentType = "image/gif";
+  else if (path.endsWith(".jpg")) contentType = "image/jpeg";
+  else if (path.endsWith(".ico")) contentType = "image/x-icon";
+  else if (path.endsWith(".xml")) contentType = "text/xml";
+  else if (path.endsWith(".pdf")) contentType = "application/x-pdf";
+  else if (path.endsWith(".zip")) contentType = "application/x-zip";
+  else if (path.endsWith(".gz")) contentType = "application/x-gzip";
+  else if (path.endsWith(".json")) contentType = "application/json";
+  else contentType = "text/plain";
+
+  //split filepath and extension
+  String prefix = path, ext = "";
+  int lastPeriod = path.lastIndexOf('.');
+  if (lastPeriod >= 0) {
+    prefix = path.substring(0, lastPeriod);
+    ext = path.substring(lastPeriod);
+  }
+
+  //look for smaller versions of file
+  //minified file, good (myscript.min.js)
+  if (SPIFFS.exists(prefix + ".min" + ext)) path = prefix + ".min" + ext;
+  //gzipped file, better (myscript.js.gz)
+  if (SPIFFS.exists(prefix + ext + ".gz")) path = prefix + ext + ".gz";
+  //min and gzipped file, best (myscript.min.js.gz)
+  if (SPIFFS.exists(prefix + ".min" + ext + ".gz")) path = prefix + ".min" + ext + ".gz";
+
+  if (SPIFFS.exists(path)) {
+    DEBUG_PRINT("sending file " + path);
+    File file = SPIFFS.open(path, "r");
+    if (server.hasArg("download"))
+      server.sendHeader("Content-Disposition", " attachment;");
+    if (server.uri().indexOf("nocache") < 0)
+      server.sendHeader("Cache-Control", " max-age=172800");
+
+    //optional alt arg (encoded url), server sends redirect to file on the web
+    if (WiFi.status() == WL_CONNECTED && server.hasArg("alt")) {
+      server.sendHeader("Location", server.arg("alt"), true);
+      server.send ( 302, "text/plain", "");
+    } else {
+      //server sends file
+      size_t sent = server.streamFile(file, contentType);
+    }
+    file.close();
+    return true;
+  } //if SPIFFS.exists
+  return false;
+} //bool handleFileRead
 
 /**
  * http invoke to handle the light
@@ -128,6 +192,9 @@ void setup() {
   Serial.begin(115200);
   Serial.println();
 
+    SPIFFS.begin();
+  persWM.begin();
+
   //WiFiManager
   //Local intialization. Once its business is done, there is no need to keep it around
   WiFiManager wifiManager;
@@ -139,17 +206,17 @@ void setup() {
 
   //reset settings - for testing
  // wifiManager.resetSettings();
-  wifiManager.setBreakAfterConfig(true);
+ // wifiManager.setBreakAfterConfig(true);
   //tries to connect to last known settings
   //if it does not connect it starts an access point with the specified name
   //here  "AutoConnectAP" with password "password"
   //and goes into a blocking loop awaiting configuration
-  if (!wifiManager.autoConnect("LIVING")) {
-    Serial.println("failed to connect, we should reset as see if it connects");
-    delay(3000);
+ // if (!wifiManager.autoConnect("LIVING")) {
+  //  Serial.println("failed to connect, we should reset as see if it connects");
+   // delay(3000);
   //  ESP.reset();
-    delay(5000);
-  }
+ //   delay(5000);
+  //}
 
   //if you get here you have connected to the WiFi
   Serial.println("connected!");
@@ -163,7 +230,6 @@ void setup() {
   server.on("/sensors", handleSensors);
 
 
-  server.begin();
 
   restclient.setContentType("text/plain; charset=utf8");
 
@@ -193,6 +259,28 @@ void setup() {
   debouncer_turn_off.attach(BUTTON_TURN_OFF);
 
   digitalWrite(LED_BUILTIN, HIGH);
+
+
+  //serve files from SPIFFS
+  server.onNotFound([]() {
+    if (!handleFileRead(server.uri())) {
+      server.sendHeader("Cache-Control", " max-age=172800");
+      server.send(302, "text/html", metaRefreshStr);
+    }
+  });
+   //SSDP makes device visible on windows network
+  server.on("/description.xml", HTTP_GET, []() {
+    SSDP.schema(server.client());
+  });
+  SSDP.setSchemaURL("description.xml");
+  SSDP.setHTTPPort(80);
+  SSDP.setName("chupamela");
+  SSDP.setURL("/");
+  SSDP.begin();
+  SSDP.setDeviceType("upnp:rootdevice");
+
+  
+  server.begin();
 
 
 }
@@ -272,6 +360,7 @@ void evaluateLight(){
 }
 
 void loop() {
+  dnsServer.processNextRequest();
   server.handleClient();
   
   checkButtons();
@@ -284,9 +373,7 @@ void loop() {
   }
 
   if (wifiStatus != WL_CONNECTED && wakeUpWifi.isExpired()  ) {
-    WiFi.mode(WIFI_STA);
-    WiFi.begin();
-    
+     WiFi.forceSleepBegin(); wdt_reset(); ESP.restart(); while(1)wdt_reset();
   }
 
    
