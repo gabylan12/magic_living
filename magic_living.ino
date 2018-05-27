@@ -11,9 +11,10 @@
 #include <ArduinoJson.h>
 #include "Bounce2.h"
 #include "DHT.h"
-#include "RestClient.h"
 #include <AsyncDelay.h>
-
+#include <ESP8266HTTPClient.h>
+#include <EEPROM.h>
+ 
 ESP8266WebServer server(80);
 DNSServer dnsServer;
 PersWiFiManager persWM(server, dnsServer);
@@ -24,9 +25,8 @@ const char *metaRefreshStr = "<script>window.location='/'</script><a href='/'>re
 String command;
 StaticJsonBuffer<200> jsonBuffer;
 JsonObject& jsonCommand = jsonBuffer.createObject();
-RestClient restclient = RestClient("openhab",8080);
 
-
+//SLEEP
 char toChar[2500];
 AsyncDelay wakeUpWifi;
 unsigned long timeToSleep;
@@ -59,6 +59,9 @@ DHT dht(DHTPIN, DHT22);
 #define BUTTON_TURN_OFF  D4
 Bounce debouncer_turn_off = Bounce();
 
+//OPENHAB REST
+HTTPClient httpClient;
+String openhabServer = "openhab:8080";
 
 //code from fsbrowser example, consolidated.
 bool handleFileRead(String path) {
@@ -119,7 +122,7 @@ bool handleFileRead(String path) {
 
 /**
  * http invoke to handle the light
- * example http://192.168.1.4:80/light?number=1&state=1
+ * example 
  * curl --header "Content-Type: application/json"   --request POST   --data '{light1:{"state":"ON"},light2:{"state":"OFF"}}'   http://living/light
  * number can be 1 or 2
  * state is 0 to OFF and 1 to ON
@@ -132,14 +135,13 @@ void handleLight() {
   String stateLight1  = request["light1"]["state"];
 
   digitalWrite(LIGHT_LIVING_ROOM_PIN,stateLight1.equals("ON")?1:0);
-  restclient.put("/rest/items/Light_Living_Room/state",stateLight1.equals("ON")?"ON":"OFF");
 
+  delay(200);
   String stateLight2  = request["light2"]["state"];
   digitalWrite(LIGHT_DINNING_ROOM_PIN,stateLight2.equals("ON")?1:0);
-  restclient.put("/rest/items/Light_Dinning_Room/state",stateLight2.equals("ON")?"ON":"OFF");
 
   server.send(200, "application/json", "{success:true}");
-  delay(500);                    
+  delay(200);                    
   digitalWrite(LED_BUILTIN, HIGH);
 }
 
@@ -153,16 +155,34 @@ void handleSensors() {
  command = "";
  jsonCommand["temperature"] = dht.readTemperature();
  jsonCommand["humidity"] = dht.readHumidity();
- jsonCommand["lightLivingRoom"] = digitalRead(LIGHT_LIVING_ROOM_PIN)?"ON":"OFF";
- jsonCommand["lightDinningRoom"] = digitalRead(LIGHT_DINNING_ROOM_PIN)?"ON":"OFF";
+ jsonCommand["light1"] = digitalRead(LIGHT_LIVING_ROOM_PIN)?"ON":"OFF";
+ jsonCommand["light2"] = digitalRead(LIGHT_DINNING_ROOM_PIN)?"ON":"OFF";
  jsonCommand["lightLevel"] = map(analogRead(PHOTOCELL), 0, 1023, 0, 100);
 
  jsonCommand.printTo(command);
  server.send(200, "text/html", command);
- delay(500);                    
+ delay(200);                    
  digitalWrite(LED_BUILTIN, HIGH);
 }
 
+/**
+ * store the config data separated by semicolon
+ * 1 - openhab location i.e. openhab:8080
+ */
+void handleConfig(){
+  openhabServer = server.arg("openhabServer");
+  char arrayToStore[20];                    // Must be greater than the length of string.
+  openhabServer.toCharArray(arrayToStore, openhabServer.length()+1);  // Convert string to array.
+  EEPROM.put(0, arrayToStore);                 // To store data
+  for (int i = 0; i < openhabServer.length(); ++i){
+        EEPROM.write(i,  (uint8_t) openhabServer[i]);
+  }
+  EEPROM.write(openhabServer.length(),  (uint8_t) ';');
+  EEPROM.commit();
+
+  server.send(200, "text/html", "OK");
+  
+}
 
 /* get time to sleep the wifi
  *  example curl --header "Content-Type: application/json"   --request POST   --data '{"minutes":1,"seconds":10}'   http://living/sleep
@@ -188,10 +208,23 @@ void handleSleep(){
 
 
 void setup() {
-  // put your setup code here, to run once:
   Serial.begin(115200);
-  Serial.println();
-
+  // read persisted parameters parameter 
+  EEPROM.begin(512);
+  char arrayToStore[20];  
+  openhabServer = "";
+  for(int i =0;i<100;i++){
+    char c = (char)EEPROM.read(i);
+    Serial.println(c);
+    if(c != ';'){
+      openhabServer += c;
+    }
+    else{
+      break;
+    }
+  }
+  Serial.println(openhabServer);
+  
   SPIFFS.begin();
   persWM.begin();
 
@@ -210,8 +243,7 @@ void setup() {
   server.on("/light", handleLight);
   server.on("/sleep", handleSleep);
   server.on("/sensors", handleSensors);
-
-  restclient.setContentType("text/plain; charset=utf8");
+  server.on("/config", handleConfig);
 
   //RELAY
   pinMode(LIGHT_LIVING_ROOM_PIN,  OUTPUT) ;
@@ -281,7 +313,9 @@ void checkButtons(){
      digitalWrite(LED_BUILTIN, LOW);
      digitalWrite(LIGHT_LIVING_ROOM_PIN , !digitalRead(LIGHT_LIVING_ROOM_PIN));  
      if(wifiStatus == WL_CONNECTED ){
-      restclient.put("/rest/items/Light_Living_Room/state",digitalRead(LIGHT_LIVING_ROOM_PIN)==HIGH?"ON":"OFF");
+      httpClient.begin("http://" + openhabServer + "/rest/items/LightLivingRoom/state");
+      httpClient.PUT(digitalRead(LIGHT_LIVING_ROOM_PIN)==HIGH?"ON":"OFF");
+      httpClient.end();
      }
      digitalWrite(LED_BUILTIN, HIGH);
   }
@@ -294,7 +328,9 @@ void checkButtons(){
      digitalWrite(LED_BUILTIN, LOW);
      digitalWrite(LIGHT_DINNING_ROOM_PIN, !digitalRead(LIGHT_DINNING_ROOM_PIN));   
      if(wifiStatus == WL_CONNECTED ){
-      restclient.put("/rest/items/Light_Dinning_Room/state",digitalRead(LIGHT_DINNING_ROOM_PIN)==HIGH?"ON":"OFF");
+      httpClient.begin("http://" + openhabServer + "/rest/items/LightDinningRoom/state");
+      httpClient.PUT(digitalRead(LIGHT_DINNING_ROOM_PIN)==HIGH?"ON":"OFF");
+      httpClient.end();
      }
      digitalWrite(LED_BUILTIN, HIGH);
   }
@@ -307,7 +343,9 @@ void checkButtons(){
   if (value==0) {
      digitalWrite(LED_BUILTIN, LOW);
      if(wifiStatus == WL_CONNECTED){ 
-      restclient.put("/rest/items/Living_Mode/state","TURN_OFF");
+      httpClient.begin("http://" + openhabServer + "/rest/items/Living_Mode/state");
+      httpClient.PUT("TURN_OFF");
+      httpClient.end();
      }
      digitalWrite(LED_BUILTIN, HIGH);
 
@@ -330,11 +368,10 @@ void evaluateLight(){
         String str = String(lastLightReading);
         char  output[5];
         str.toCharArray(output,5);
-        restclient.put("/rest/items/Living_Light/state",output);
-  
+        httpClient.begin("http://" + openhabServer + "/rest/items/Living_Light/state");
+        httpClient.PUT(output);
+        httpClient.end();
       }
-      
-     
 }
 
 void loop() {
