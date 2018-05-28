@@ -55,7 +55,23 @@
 	<div style='text-align:left;display:inline-block;width:320px;padding:5px'>
 		<br>
 		<form method='post' action='http://living/config'>
-			<input id='p' name='openhabServer' length=64 type='text' placeholder='openhab:8080'>
+			OpenHab Location
+			<input id='p' name='openhabServer' value='openhab:8080' length=64 type='text'>
+			<br>
+			Openhab	Light item 1
+			<input id='p' name='openhabLight1Item' value='LightLivingRoom' length=64 type='text'>
+			<br>
+			Openhab	Light item 2
+			<input id='p' name='openhabLight2Item' value='LightDinningRoom' length=64 type='text'>
+			<br>
+			Openhab	Special Item
+			<input id='p' name='openhabSpecialItem' value='LivingMode' length=64 type='text'>
+			<br>
+			Openhab	Special Command
+			<input id='p' name='openhabSpecialCom' value='TURN_OFF' length=64 type='text'>
+			<br>
+			Openhab	Light Density Level
+			<input id='p' name='openhabLightLevel' value='LivingLight' length=64 type='text'>
 			<br>
 			<br>
 			<button type='submit'>Confirm</button>

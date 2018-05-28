@@ -34,8 +34,8 @@ int wifiStatus;
 
 
 //RELAY
-#define LIGHT_LIVING_ROOM_PIN  D7
-#define LIGHT_DINNING_ROOM_PIN  D8
+#define LIGHT_1_PIN  D7
+#define LIGHT_2_PIN  D8
 #define BUTTON_PIN_RELAY_1  D2
 #define BUTTON_PIN_RELAY_2  D3
 
@@ -61,7 +61,12 @@ Bounce debouncer_turn_off = Bounce();
 
 //OPENHAB REST
 HTTPClient httpClient;
-String openhabServer = "openhab:8080";
+String openhabServer;
+String openhabLight1Item;
+String openhabLight2Item;
+String openhabSpecialItem;
+String openhabSpecialCommand;
+String openhabLightLevel;
 
 //code from fsbrowser example, consolidated.
 bool handleFileRead(String path) {
@@ -134,11 +139,11 @@ void handleLight() {
   JsonObject& request = newBuffer.parseObject(server.arg("plain"));
   String stateLight1  = request["light1"]["state"];
 
-  digitalWrite(LIGHT_LIVING_ROOM_PIN,stateLight1.equals("ON")?1:0);
+  digitalWrite(LIGHT_1_PIN,stateLight1.equals("ON")?1:0);
 
   delay(200);
   String stateLight2  = request["light2"]["state"];
-  digitalWrite(LIGHT_DINNING_ROOM_PIN,stateLight2.equals("ON")?1:0);
+  digitalWrite(LIGHT_2_PIN,stateLight2.equals("ON")?1:0);
 
   server.send(200, "application/json", "{success:true}");
   delay(200);                    
@@ -155,8 +160,8 @@ void handleSensors() {
  command = "";
  jsonCommand["temperature"] = dht.readTemperature();
  jsonCommand["humidity"] = dht.readHumidity();
- jsonCommand["light1"] = digitalRead(LIGHT_LIVING_ROOM_PIN)?"ON":"OFF";
- jsonCommand["light2"] = digitalRead(LIGHT_DINNING_ROOM_PIN)?"ON":"OFF";
+ jsonCommand["light1"] = digitalRead(LIGHT_1_PIN)?"ON":"OFF";
+ jsonCommand["light2"] = digitalRead(LIGHT_2_PIN)?"ON":"OFF";
  jsonCommand["lightLevel"] = map(analogRead(PHOTOCELL), 0, 1023, 0, 100);
 
  jsonCommand.printTo(command);
@@ -170,14 +175,57 @@ void handleSensors() {
  * 1 - openhab location i.e. openhab:8080
  */
 void handleConfig(){
+  //set openhab location
+  int index = 0;
+  
   openhabServer = server.arg("openhabServer");
-  char arrayToStore[20];                    // Must be greater than the length of string.
-  openhabServer.toCharArray(arrayToStore, openhabServer.length()+1);  // Convert string to array.
-  EEPROM.put(0, arrayToStore);                 // To store data
-  for (int i = 0; i < openhabServer.length(); ++i){
-        EEPROM.write(i,  (uint8_t) openhabServer[i]);
+  int lastIndex = openhabServer.length();
+  for (index; index < lastIndex; ++index){
+        EEPROM.write(index,  (uint8_t) openhabServer[index]);
   }
-  EEPROM.write(openhabServer.length(),  (uint8_t) ';');
+  EEPROM.write(index++,  (uint8_t) ';');
+
+  //set light item 1
+  openhabLight1Item = server.arg("openhabLight1Item");
+  lastIndex  = index + openhabLight1Item.length();
+  for (index; index < lastIndex; ++index){
+        EEPROM.write(index,  (uint8_t) openhabLight1Item[ (index+openhabLight1Item.length()) - lastIndex]);
+  }
+  EEPROM.write(index++,  (uint8_t) ';');
+
+  //set light item 2
+  openhabLight2Item = server.arg("openhabLight2Item");
+  lastIndex  = index + openhabLight2Item.length();
+  for (index; index < lastIndex; ++index){
+        EEPROM.write(index,  (uint8_t) openhabLight2Item[ (index+openhabLight2Item.length()) - lastIndex]);
+  }
+  EEPROM.write(index++,  (uint8_t) ';');
+
+  //set special item
+  openhabSpecialItem = server.arg("openhabSpecialItem");
+  lastIndex  = index + openhabSpecialItem.length();
+  for (index; index < lastIndex; ++index){
+        EEPROM.write(index,  (uint8_t) openhabSpecialItem[ (index+openhabSpecialItem.length()) - lastIndex]);
+  }
+  EEPROM.write(index++,  (uint8_t) ';');
+
+  //set special command
+  openhabSpecialCommand = server.arg("openhabSpecialCom");
+  lastIndex  = index + openhabSpecialCommand.length();
+  for (index; index < lastIndex; ++index){
+        EEPROM.write(index,  (uint8_t) openhabSpecialCommand[ (index+openhabSpecialCommand.length()) - lastIndex]);
+  }
+  EEPROM.write(index++,  (uint8_t) ';');
+
+  //set light level
+  openhabLightLevel = server.arg("openhabLightLevel");
+  lastIndex  = index + openhabLightLevel.length();
+  for (index; index < lastIndex; ++index){
+        EEPROM.write(index,  (uint8_t) openhabLightLevel[ (index+openhabLightLevel.length()) - lastIndex]);
+  }
+  EEPROM.write(index++,  (uint8_t) ';');
+
+  
   EEPROM.commit();
 
   server.send(200, "text/html", "OK");
@@ -213,18 +261,39 @@ void setup() {
   EEPROM.begin(512);
   char arrayToStore[20];  
   openhabServer = "";
-  for(int i =0;i<100;i++){
+  openhabLight1Item = "";
+  openhabLight2Item = "";
+  openhabSpecialItem = "";
+  openhabSpecialCommand = "";
+  openhabLightLevel = "";
+  int statusRead = 0;
+  for(int i =0;i<300;i++){
     char c = (char)EEPROM.read(i);
     Serial.println(c);
-    if(c != ';'){
-      openhabServer += c;
+    if(c == ';'){
+      statusRead++;
+      if(statusRead == 6){
+        break;
+      }
     }
     else{
-      break;
+      switch(statusRead){
+        case 0: openhabServer += c; break;
+        case 1: openhabLight1Item += c; break;
+        case 2: openhabLight2Item += c; break;
+        case 3: openhabSpecialItem += c; break;
+        case 4: openhabSpecialCommand += c; break;
+        case 5: openhabLightLevel += c; break;
+      }
     }
   }
   Serial.println(openhabServer);
-  
+  Serial.println(openhabLight1Item);
+  Serial.println(openhabLight2Item);
+  Serial.println(openhabSpecialItem);
+  Serial.println(openhabSpecialCommand);
+  Serial.println(openhabLightLevel);
+
   SPIFFS.begin();
   persWM.begin();
 
@@ -246,8 +315,8 @@ void setup() {
   server.on("/config", handleConfig);
 
   //RELAY
-  pinMode(LIGHT_LIVING_ROOM_PIN,  OUTPUT) ;
-  pinMode(LIGHT_DINNING_ROOM_PIN,  OUTPUT) ;
+  pinMode(LIGHT_1_PIN,  OUTPUT) ;
+  pinMode(LIGHT_2_PIN,  OUTPUT) ;
 
   pinMode(BUTTON_PIN_RELAY_1, INPUT_PULLUP);
   debouncer_relay1.attach(BUTTON_PIN_RELAY_1);
@@ -311,10 +380,10 @@ void checkButtons(){
   int value = debouncer_relay1.read();
   if (value != state_relay1 && value==0) {
      digitalWrite(LED_BUILTIN, LOW);
-     digitalWrite(LIGHT_LIVING_ROOM_PIN , !digitalRead(LIGHT_LIVING_ROOM_PIN));  
+     digitalWrite(LIGHT_1_PIN , !digitalRead(LIGHT_1_PIN));  
      if(wifiStatus == WL_CONNECTED ){
-      httpClient.begin("http://" + openhabServer + "/rest/items/LightLivingRoom/state");
-      httpClient.PUT(digitalRead(LIGHT_LIVING_ROOM_PIN)==HIGH?"ON":"OFF");
+      httpClient.begin("http://" + openhabServer + "/rest/items/"+openhabLight1Item+"/state");
+      httpClient.PUT(digitalRead(LIGHT_1_PIN)==HIGH?"ON":"OFF");
       httpClient.end();
      }
      digitalWrite(LED_BUILTIN, HIGH);
@@ -326,10 +395,10 @@ void checkButtons(){
   value = debouncer_relay2.read();
   if (value != state_relay2 && value==0) {
      digitalWrite(LED_BUILTIN, LOW);
-     digitalWrite(LIGHT_DINNING_ROOM_PIN, !digitalRead(LIGHT_DINNING_ROOM_PIN));   
+     digitalWrite(LIGHT_2_PIN, !digitalRead(LIGHT_2_PIN));   
      if(wifiStatus == WL_CONNECTED ){
-      httpClient.begin("http://" + openhabServer + "/rest/items/LightDinningRoom/state");
-      httpClient.PUT(digitalRead(LIGHT_DINNING_ROOM_PIN)==HIGH?"ON":"OFF");
+      httpClient.begin("http://" + openhabServer + "/rest/items/"+openhabLight2Item+"/state");
+      httpClient.PUT(digitalRead(LIGHT_2_PIN)==HIGH?"ON":"OFF");
       httpClient.end();
      }
      digitalWrite(LED_BUILTIN, HIGH);
@@ -343,8 +412,8 @@ void checkButtons(){
   if (value==0) {
      digitalWrite(LED_BUILTIN, LOW);
      if(wifiStatus == WL_CONNECTED){ 
-      httpClient.begin("http://" + openhabServer + "/rest/items/Living_Mode/state");
-      httpClient.PUT("TURN_OFF");
+      httpClient.begin("http://" + openhabServer + "/rest/items/"+openhabSpecialItem+"/state");
+      httpClient.PUT(openhabSpecialCommand);
       httpClient.end();
      }
      digitalWrite(LED_BUILTIN, HIGH);
@@ -368,7 +437,7 @@ void evaluateLight(){
         String str = String(lastLightReading);
         char  output[5];
         str.toCharArray(output,5);
-        httpClient.begin("http://" + openhabServer + "/rest/items/Living_Light/state");
+        httpClient.begin("http://" + openhabServer + "/rest/items/"+openhabLightLevel+"/state");
         httpClient.PUT(output);
         httpClient.end();
       }
